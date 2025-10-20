@@ -1,0 +1,5 @@
+{
+  "name": "National-Regional Rate Analysis Web App",
+  "description": "A comprehensive platform for construction rate analysis, quantity estimation, and project costing, based on the finalized project scope. This application provides bilingual capabilities, project-level analytics, and export-ready documentation for engineers and project managers.",
+  "requestFramePermissions": []
+}
