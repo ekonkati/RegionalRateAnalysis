@@ -1,5 +1,7 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Ratebook } from '../types';
+// FIX: Add Organization to props to be used in upload logic
+import { Ratebook, Organization } from '../types';
 import Icon from './Icon';
 import { ICONS } from '../constants';
 import RatebookDetails from './ratebook/RatebookDetails';
@@ -11,13 +13,14 @@ import { User } from '@supabase/supabase-js';
 
 interface RatebooksProps {
   user: User;
+  org: Organization;
 }
 
 type RatebookView = 'list' | 'details' | 'compare';
 type UploadStatus = 'idle' | 'parsing' | 'uploading' | 'complete' | 'error';
 interface UploadResult { successCount: number; errorCount: number; errors: string[]; }
 
-const Ratebooks: React.FC<RatebooksProps> = ({ user }) => {
+const Ratebooks: React.FC<RatebooksProps> = ({ user, org }) => {
     const [ratebooks, setRatebooks] = useState<Ratebook[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [view, setView] = useState<RatebookView>('list');
@@ -30,11 +33,11 @@ const Ratebooks: React.FC<RatebooksProps> = ({ user }) => {
     const fetchRatebooks = async () => {
         setIsLoading(true);
         try {
-            // Fetch public ratebooks (user_id is null) AND user's own ratebooks
+            // Fetch public ratebooks (org_id is null) AND user's org ratebooks
             const { data, error } = await supabase
                 .from('ratebooks')
                 .select('*')
-                .or(`user_id.eq.${user.id},user_id.is.null`);
+                .or(`org_id.eq.${org.id},org_id.is.null`);
 
             if (error) throw error;
             setRatebooks(data || []);
@@ -50,7 +53,7 @@ const Ratebooks: React.FC<RatebooksProps> = ({ user }) => {
             fetchRatebooks();
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [view, user]);
+    }, [view, user, org]);
 
     const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
@@ -71,30 +74,35 @@ const Ratebooks: React.FC<RatebooksProps> = ({ user }) => {
                 
                 setUploadStatus('uploading');
                 
-                // 1. Create the new custom ratebook for the user
+                // 1. Create the new custom ratebook for the user's org
                 const newRatebookName = file.name.replace(/\.(xlsx|xls)$/, '');
+                // FIX: Insert into ratebooks with correct properties (org_id, source_type, status)
                 const { data: newRatebook, error: rbError } = await supabase.from('ratebooks').insert({
                     name: newRatebookName,
-                    source: 'Custom',
+                    source_type: 'upload',
                     year: new Date().getFullYear(),
-                    status: 'Draft',
-                    items_count: json.length,
-                    user_id: user.id
+                    status: 'draft',
+                    org_id: org.id,
+                    // Note: region_id is required, using org default or first available as fallback
+                    region_id: org.region_default_id || '00000000-0000-0000-0000-000000000000' // Placeholder
                 }).select().single();
 
                 if (rbError) throw rbError;
 
                 // 2. Prepare and insert ratebook items
+                // FIX: Map to correct column names for 'ratebook_details' table
                 const itemsToInsert = json.map(row => ({
                     ratebook_id: newRatebook.id,
                     code: row.code || 'N/A',
-                    description: row.description || 'No description',
+                    description_en: row.description || 'No description',
                     uom: row.uom || 'unit',
-                    rate: parseFloat(row.rate) || 0,
+                    base_rate: parseFloat(row.rate) || 0,
                     is_custom: true,
+                    category: row.category || 'composite' // Add required category
                 }));
 
-                const { error: itemsError } = await supabase.from('ratebook_items').insert(itemsToInsert);
+                // FIX: Insert into 'ratebook_details' table instead of 'ratebook_items'
+                const { error: itemsError } = await supabase.from('ratebook_details').insert(itemsToInsert);
                 if(itemsError) throw itemsError;
 
                 setUploadResult({ successCount: json.length, errorCount: 0, errors: [] });
@@ -164,11 +172,13 @@ const Ratebooks: React.FC<RatebooksProps> = ({ user }) => {
                         ) : ratebooks.map(rb => (
                             <tr key={rb.id} className="bg-white border-b hover:bg-slate-50 cursor-pointer" onClick={() => handleViewDetails(rb)}>
                                 <td className="px-6 py-4 font-semibold text-slate-900">{rb.name}</td>
-                                <td className="px-6 py-4">{rb.source}</td>
+                                {/* FIX: Use 'source_type' instead of non-existent 'source' property. */}
+                                <td className="px-6 py-4">{rb.source_type}</td>
                                 <td className="px-6 py-4">{rb.year}</td>
-                                <td className="px-6 py-4 text-right font-mono">{rb.items_count.toLocaleString()}</td>
-                                <td className="px-6 py-4"><span className={`px-2 py-1 text-xs font-medium rounded-full ${rb.status === 'Published' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>{rb.status}</span></td>
-                                <td className="px-6 py-4">{new Date(rb.last_updated).toLocaleDateString()}</td>
+                                <td className="px-6 py-4 text-right font-mono">{(rb.items_count || 0).toLocaleString()}</td>
+                                {/* FIX: Use lowercase 'published' for status comparison. */}
+                                <td className="px-6 py-4"><span className={`px-2 py-1 text-xs font-medium rounded-full ${rb.status === 'published' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>{rb.status}</span></td>
+                                <td className="px-6 py-4">{rb.last_updated ? new Date(rb.last_updated).toLocaleDateString() : 'N/A'}</td>
                                 <td className="px-6 py-4 text-center">
                                     <button onClick={(e) => { e.stopPropagation(); }} className="p-2 rounded-full hover:bg-slate-200">
                                         <Icon path={ICONS.DOTS_VERTICAL} className="w-5 h-5"/>

@@ -1,15 +1,17 @@
 
 
 
+
 import React, { useMemo } from 'react';
-import { RatebookDetailItem } from '../../types';
+// FIX: Use the correct 'RatebookDetail' type.
+import { RatebookDetail } from '../../types';
 import Icon from '../Icon';
 import { ICONS } from '../../constants';
 
 interface RatebookItemModalProps {
   isOpen: boolean;
   onClose: () => void;
-  item: RatebookDetailItem;
+  item: RatebookDetail;
 }
 
 const AnalysisBar: React.FC<{ label: string; value: number; color: string }> = ({ label, value, color }) => (
@@ -32,11 +34,12 @@ const RatebookItemModal: React.FC<RatebookItemModalProps> = ({ isOpen, onClose, 
     return null;
   }
 
-  // FIX: Destructure correct properties `base_rate` and `rate_analyses` from item.
-  const { code, description, uom, base_rate, rate_analyses, is_custom } = item;
+  // FIX: Destructure correct properties 'base_rate', 'description_en', and optional 'rate_analyses' from item.
+  const { code, description_en: description, uom, base_rate, rate_analyses, is_custom } = item;
 
   // FIX: Calculate analysis breakdown from the available `rate_analyses` data.
   const analysisBreakdown = useMemo(() => {
+    // FIX: Check for optional 'rate_analyses' and its 'components' property.
     if (!rate_analyses || !rate_analyses.components || rate_analyses.components.length === 0) {
         return null;
     }
@@ -51,6 +54,7 @@ const RatebookItemModal: React.FC<RatebookItemModalProps> = ({ isOpen, onClose, 
 
     for (const component of rate_analyses.components) {
         const componentCost = (component.quantity || 0) * (component.rate || 0);
+        // FIX: Check for 'component_type' which might exist on the 'any' type.
         if (component.component_type === 'material') {
             totals.material += componentCost;
         } else if (component.component_type === 'labour') {

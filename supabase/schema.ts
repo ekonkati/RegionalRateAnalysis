@@ -1,209 +1,305 @@
-
-// This file contains the SQL script to set up your Supabase database.
-//
-// HOW TO USE:
-// 1. Copy the entire string content from the `schema` variable below.
-// 2. Go to your Supabase project dashboard.
-// 3. Navigate to the "SQL Editor".
-// 4. Click "+ New query".
-// 5. Paste the copied SQL script into the editor.
-// 6. Click "RUN".
-//
-// This will create all the necessary tables and enable Row Level Security.
-
 export const schema = `
--- Drop existing tables in reverse order of dependency to avoid foreign key constraints issues
+-- Disable Row Level Security for initial setup
+ALTER TABLE IF EXISTS public.boq_items DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.subprojects DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.projects DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.ratebook_details DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.ratebooks DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.glossary DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.regional_factors DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.regions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.subscriptions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.user_orgs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.organizations DISABLE ROW LEVEL SECURITY;
+
+-- Drop existing tables in reverse order of dependency
 DROP TABLE IF EXISTS public.boq_items;
 DROP TABLE IF EXISTS public.subprojects;
 DROP TABLE IF EXISTS public.projects;
-DROP TABLE IF EXISTS public.rate_analysis_components;
-DROP TABLE IF EXISTS public.rate_analyses;
-DROP TABLE IF EXISTS public.ratebook_items;
+DROP TABLE IF EXISTS public.ratebook_details;
 DROP TABLE IF EXISTS public.ratebooks;
-DROP TABLE IF EXISTS public.seigniorage_charges;
-DROP TABLE IF EXISTS public.loading_unloading_charges;
-DROP TABLE IF EXISTS public.transport_charge_slabs;
-DROP TABLE IF EXISTS public.contractor_overheads;
+DROP TABLE IF EXISTS public.glossary;
+DROP TABLE IF EXISTS public.regional_factors;
+DROP TABLE IF EXISTS public.regions;
+DROP TABLE IF EXISTS public.subscriptions;
+DROP TABLE IF EXISTS public.user_orgs;
+DROP TABLE IF EXISTS public.organizations;
 
--- Create Ratebooks Table
-CREATE TABLE public.ratebooks (
-    id TEXT PRIMARY KEY DEFAULT 'rb-' || lower(hex(randomblob(8))),
+-- Drop types and functions if they exist
+DROP TYPE IF EXISTS public.plan_type;
+DROP TYPE IF EXISTS public.user_role;
+DROP TYPE IF EXISTS public.ratebook_source_type;
+DROP TYPE IF EXISTS public.ratebook_status;
+DROP TYPE IF EXISTS public.project_type;
+DROP TYPE IF EXISTS public.project_status;
+DROP TYPE IF EXISTS public.item_category;
+DROP TYPE IF EXISTS public.language_code;
+DROP FUNCTION IF EXISTS public.handle_new_user();
+DROP FUNCTION IF EXISTS public.set_config_for_org(text);
+
+-- Create ENUM types
+CREATE TYPE public.plan_type AS ENUM ('free', 'pro', 'enterprise');
+CREATE TYPE public.user_role AS ENUM ('owner', 'admin', 'editor', 'viewer');
+CREATE TYPE public.ratebook_source_type AS ENUM ('derived', 'upload');
+CREATE TYPE public.ratebook_status AS ENUM ('draft', 'published', 'archived');
+CREATE TYPE public.project_type AS ENUM ('building', 'road', 'drain', 'industrial', 'custom');
+CREATE TYPE public.project_status AS ENUM ('active', 'archived');
+CREATE TYPE public.item_category AS ENUM ('labour', 'material', 'machinery', 'carriage', 'composite', 'sundry', 'adjustment', 'concrete');
+CREATE TYPE public.language_code AS ENUM ('en', 'hi', 'te', 'mr');
+
+-- 1. Core Administrative Entities
+CREATE TABLE public.organizations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
-    source TEXT NOT NULL,
-    year INT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'Draft',
-    items_count INT NOT NULL DEFAULT 0,
-    last_updated TIMESTAMPTZ NOT NULL DEFAULT now(),
+    domain TEXT UNIQUE,
+    region_default_id UUID,
+    plan_type public.plan_type NOT NULL DEFAULT 'free',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE public.ratebooks IS 'Stores schedules of rates books, e.g., CPWD DSR 2025.';
+COMMENT ON TABLE public.organizations IS 'Logical workspace for teams/projects.';
 
--- Create Contractor Overheads Table
-CREATE TABLE public.contractor_overheads (
-    id TEXT PRIMARY KEY DEFAULT 'co-' || lower(hex(randomblob(8))),
-    region TEXT NOT NULL UNIQUE,
-    percentage NUMERIC(5, 3) NOT NULL
+CREATE TABLE public.user_orgs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    org_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+    role public.user_role NOT NULL DEFAULT 'viewer',
+    status TEXT,
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(user_id, org_id)
 );
-COMMENT ON TABLE public.contractor_overheads IS 'Stores contractor profit and overhead percentages by region.';
+COMMENT ON TABLE public.user_orgs IS 'Many-to-many link between users and organizations.';
 
--- Create Seigniorage Charges Table
-CREATE TABLE public.seigniorage_charges (
-    id TEXT PRIMARY KEY DEFAULT 'sgc-' || lower(hex(randomblob(8))),
-    region TEXT NOT NULL,
-    material_category TEXT NOT NULL,
-    rate NUMERIC(10, 2) NOT NULL,
-    uom TEXT NOT NULL,
-    UNIQUE(region, material_category)
+CREATE TABLE public.subscriptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE UNIQUE,
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    plan_type public.plan_type NOT NULL DEFAULT 'free',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    max_projects INT NOT NULL DEFAULT 5,
+    started_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ
 );
-COMMENT ON TABLE public.seigniorage_charges IS 'Stores royalty/seigniorage fees for raw materials by region.';
+COMMENT ON TABLE public.subscriptions IS 'Billing and plan status per organization.';
 
--- Create Loading and Unloading Charges Table
-CREATE TABLE public.loading_unloading_charges (
-    id TEXT PRIMARY KEY DEFAULT 'luc-' || lower(hex(randomblob(8))),
-    region TEXT NOT NULL,
-    material_category TEXT NOT NULL,
-    charge_type TEXT NOT NULL, -- 'loading' or 'unloading'
-    method TEXT NOT NULL, -- 'manual' or 'mechanical'
-    rate NUMERIC(10, 2) NOT NULL,
-    uom TEXT NOT NULL,
-    UNIQUE(region, material_category, charge_type, method)
-);
-COMMENT ON TABLE public.loading_unloading_charges IS 'Stores costs for loading and unloading materials.';
-
--- Create Transport (Lead/Lift) Charge Slabs Table
-CREATE TABLE public.transport_charge_slabs (
-    id TEXT PRIMARY KEY DEFAULT 'tcs-' || lower(hex(randomblob(8))),
-    region TEXT NOT NULL,
-    transport_type TEXT NOT NULL, -- 'lead' or 'lift'
-    material_category TEXT NOT NULL,
-    start_dist NUMERIC(8, 2) NOT NULL,
-    end_dist NUMERIC(8, 2) NOT NULL,
-    rate NUMERIC(10, 2) NOT NULL, -- Rate for this slab (per uom per distance unit)
-    is_fixed_rate BOOLEAN DEFAULT FALSE -- True if the rate is a total for the slab, not per km/m
-);
-COMMENT ON TABLE public.transport_charge_slabs IS 'Stores tiered transport (lead) and vertical movement (lift) charges.';
-
-
--- Create Ratebook Items Table
-CREATE TABLE public.ratebook_items (
-    id TEXT PRIMARY KEY DEFAULT 'rbi-' || lower(hex(randomblob(8))),
-    ratebook_id TEXT NOT NULL REFERENCES public.ratebooks(id) ON DELETE CASCADE,
-    code TEXT NOT NULL,
-    description TEXT NOT NULL,
-    uom TEXT NOT NULL,
-    base_rate NUMERIC(12, 2) NOT NULL, -- The final rate from the SOR, including overheads
-    initial_lead_included_km NUMERIC(8, 2) DEFAULT 0,
-    initial_lift_included_m NUMERIC(8, 2) DEFAULT 0,
-    is_custom BOOLEAN NOT NULL DEFAULT FALSE,
+-- 2. Regional & Ratebook Management
+CREATE TABLE public.regions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL UNIQUE,
+    short_code TEXT NOT NULL UNIQUE,
+    country TEXT NOT NULL DEFAULT 'India',
+    base_factor_labour NUMERIC(5,3) NOT NULL DEFAULT 1.0,
+    base_factor_material NUMERIC(5,3) NOT NULL DEFAULT 1.0,
+    base_factor_machinery NUMERIC(5,3) NOT NULL DEFAULT 1.0,
+    base_factor_carriage NUMERIC(5,3) NOT NULL DEFAULT 1.0,
+    currency_symbol VARCHAR(4) NOT NULL DEFAULT '₹',
+    locale TEXT NOT NULL DEFAULT 'en-IN',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE public.ratebook_items IS 'Individual line items for each ratebook.';
+COMMENT ON TABLE public.regions IS 'Administrative regions or departments.';
 
--- Create Rate Analyses Table (Header for a breakdown)
-CREATE TABLE public.rate_analyses (
-    id TEXT PRIMARY KEY DEFAULT 'ra-' || lower(hex(randomblob(8))),
-    ratebook_item_id TEXT NOT NULL REFERENCES public.ratebook_items(id) ON DELETE CASCADE UNIQUE,
-    contractor_overhead_id TEXT REFERENCES public.contractor_overheads(id),
-    analysis_for_quantity NUMERIC(10,2) NOT NULL DEFAULT 1.00,
-    uom TEXT NOT NULL
-);
-COMMENT ON TABLE public.rate_analyses IS 'Header for a detailed rate breakdown of a ratebook item.';
-
--- Create Rate Analysis Components Table (Materials, Labour, Machinery)
-CREATE TABLE public.rate_analysis_components (
-    id TEXT PRIMARY KEY DEFAULT 'rac-' || lower(hex(randomblob(8))),
-    rate_analysis_id TEXT NOT NULL REFERENCES public.rate_analyses(id) ON DELETE CASCADE,
-    component_type TEXT NOT NULL, -- 'material', 'labour', 'machinery'
-    description TEXT NOT NULL,
-    quantity NUMERIC(12, 4),
-    uom TEXT,
-    rate NUMERIC(12, 2)
-);
-COMMENT ON TABLE public.rate_analysis_components IS 'Component items for a rate analysis (materials, labour, etc).';
-
-
--- Create Projects Table
-CREATE TABLE public.projects (
-    id TEXT PRIMARY KEY DEFAULT 'proj-' || lower(hex(randomblob(8))),
+CREATE TABLE public.ratebooks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
-    region TEXT,
-    status TEXT NOT NULL DEFAULT 'Planning',
-    total_cost NUMERIC(15, 2) NOT NULL DEFAULT 0,
-    ratebook_id TEXT REFERENCES public.ratebooks(id) ON DELETE SET NULL,
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    region_id UUID NOT NULL REFERENCES public.regions(id),
+    org_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE, -- Custom ratebooks belong to an org
+    year INT NOT NULL,
+    effective_date DATE,
+    source_type public.ratebook_source_type NOT NULL,
+    parent_ratebook_id UUID REFERENCES public.ratebooks(id),
+    status public.ratebook_status NOT NULL DEFAULT 'draft',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    published_at TIMESTAMPTZ
+);
+COMMENT ON TABLE public.ratebooks IS 'CPWD and State rate card containers.';
+
+CREATE TABLE public.ratebook_details (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ratebook_id UUID NOT NULL REFERENCES public.ratebooks(id) ON DELETE CASCADE,
+    code VARCHAR(50) NOT NULL,
+    description_en TEXT NOT NULL,
+    description_local TEXT,
+    lang_code public.language_code,
+    uom VARCHAR(20) NOT NULL,
+    category public.item_category NOT NULL,
+    base_rate NUMERIC(12, 2) NOT NULL,
+    mapped_cpwd_code VARCHAR(50),
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(ratebook_id, code)
+);
+COMMENT ON TABLE public.ratebook_details IS 'Item-level rate definitions (bilingual).';
+
+-- 3. Project Hierarchy & BOQ Data
+CREATE TABLE public.projects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    project_type public.project_type NOT NULL DEFAULT 'building',
+    region_id UUID NOT NULL REFERENCES public.regions(id),
+    ratebook_id UUID NOT NULL REFERENCES public.ratebooks(id),
+    water_pct NUMERIC(5, 3) NOT NULL DEFAULT 1.0,
+    gst_factor NUMERIC(6, 4) NOT NULL DEFAULT 0.2127,
+    cpoh_pct NUMERIC(5, 2) NOT NULL DEFAULT 15.0,
+    cess_pct NUMERIC(5, 2) NOT NULL DEFAULT 1.0,
+    language public.language_code NOT NULL DEFAULT 'en',
+    status public.project_status NOT NULL DEFAULT 'active',
     last_updated TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE public.projects IS 'Top-level construction projects.';
+COMMENT ON TABLE public.projects IS 'Top-level project records.';
 
--- Create Subprojects Table
 CREATE TABLE public.subprojects (
-    id TEXT PRIMARY KEY DEFAULT 'sp-' || lower(hex(randomblob(8))),
-    project_id TEXT NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
+    description TEXT,
+    status TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE public.subprojects IS 'Sub-sections of a project, e.g., Foundation Works.';
+COMMENT ON TABLE public.subprojects IS 'Logical groupings within a project.';
 
--- Create Bill of Quantities (BOQ) Items Table
 CREATE TABLE public.boq_items (
-    id TEXT PRIMARY KEY DEFAULT 'boqi-' || lower(hex(randomblob(8))),
-    subproject_id TEXT NOT NULL REFERENCES public.subprojects(id) ON DELETE CASCADE,
-    ratebook_item_id TEXT NOT NULL REFERENCES public.ratebook_items(id),
-    quantity NUMERIC(12, 2) NOT NULL,
-    -- User-defined overrides for specific BOQ items
-    total_lead_km NUMERIC(8, 2),
-    total_lift_m NUMERIC(8, 2),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    subproject_id UUID NOT NULL REFERENCES public.subprojects(id) ON DELETE CASCADE,
+    ratebook_detail_id UUID NOT NULL REFERENCES public.ratebook_details(id),
+    quantity NUMERIC(14, 3) NOT NULL,
+    -- Analysis & Overrides
+    analysis_json JSONB,
+    is_locked BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE public.boq_items IS 'Links ratebook items to subprojects to form the BOQ.';
+COMMENT ON TABLE public.boq_items IS 'Bill-of-quantities entries with computed rates.';
 
 
--- Indexes for performance
-CREATE INDEX idx_ratebook_items_ratebook_id ON public.ratebook_items(ratebook_id);
-CREATE INDEX idx_projects_user_id ON public.projects(user_id);
-CREATE INDEX idx_rate_analysis_components_analysis_id ON public.rate_analysis_components(rate_analysis_id);
+-- 4. Glossary & Multilingual Support
+CREATE TABLE public.glossary (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE, -- Custom terms for an org
+    term VARCHAR(100) NOT NULL,
+    category VARCHAR(50),
+    en TEXT,
+    hi TEXT,
+    te TEXT,
+    mr TEXT,
+    notes TEXT,
+    approved_by UUID REFERENCES auth.users(id),
+    approved_at TIMESTAMPTZ,
+    UNIQUE(org_id, term)
+);
+COMMENT ON TABLE public.glossary IS 'Curated bilingual technical dictionary.';
 
--- ROW LEVEL SECURITY (RLS)
-ALTER TABLE public.ratebooks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ratebook_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.rate_analyses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.rate_analysis_components ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.subprojects ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.boq_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.contractor_overheads ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.seigniorage_charges ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.loading_unloading_charges ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.transport_charge_slabs ENABLE ROW LEVEL SECURITY;
-
--- Policies
-CREATE POLICY "Allow users to manage their own ratebooks" ON public.ratebooks FOR ALL USING (auth.uid() = user_id);
-CREATE POLICY "Allow users to view public ratebooks" ON public.ratebooks FOR SELECT USING (user_id IS NULL);
-CREATE POLICY "Allow view access to items based on parent ratebook" ON public.ratebook_items FOR SELECT USING ((SELECT EXISTS (SELECT 1 FROM public.ratebooks WHERE id = ratebook_id)));
-CREATE POLICY "Allow access to analysis based on ratebook item" ON public.rate_analyses FOR ALL USING ((SELECT EXISTS (SELECT 1 FROM public.ratebook_items rbi JOIN public.ratebooks rb ON rbi.ratebook_id = rb.id WHERE rbi.id = ratebook_item_id AND (rb.user_id = auth.uid() OR rb.user_id IS NULL))));
-CREATE POLICY "Allow access to components based on analysis" ON public.rate_analysis_components FOR ALL USING ((SELECT EXISTS (SELECT 1 FROM public.rate_analyses WHERE id = rate_analysis_id)));
-CREATE POLICY "Allow users to manage their own projects" ON public.projects FOR ALL USING (auth.uid() = user_id);
-CREATE POLICY "Allow access based on parent project" ON public.subprojects FOR ALL USING (((SELECT user_id FROM public.projects WHERE id = project_id) = auth.uid()));
-CREATE POLICY "Allow access based on grandparent project" ON public.boq_items FOR ALL USING (((SELECT p.user_id FROM public.projects p JOIN public.subprojects sp ON p.id = sp.project_id WHERE sp.id = subproject_id) = auth.uid()));
-CREATE POLICY "Allow read access to all authenticated users for charges" ON public.contractor_overheads FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow read access to all authenticated users for seigniorage" ON public.seigniorage_charges FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow read access to all authenticated users for loading" ON public.loading_unloading_charges FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow read access to all authenticated users for transport" ON public.transport_charge_slabs FOR SELECT USING (auth.role() = 'authenticated');
-
--- Function to update 'last_updated' timestamp
-CREATE OR REPLACE FUNCTION public.update_last_updated_column()
+-- Handle New User: Create Org and link them as owner
+CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  new_org_id UUID;
 BEGIN
-   NEW.last_updated = now(); 
-   RETURN NEW;
-END;
-$$ language 'plpgsql';
+  -- Create a new organization for the user
+  INSERT INTO public.organizations (name, plan_type)
+  VALUES (NEW.email || '''s Org', 'free')
+  RETURNING id INTO new_org_id;
 
--- Trigger for projects table
-CREATE TRIGGER update_projects_last_updated
-BEFORE UPDATE ON public.projects
-FOR EACH ROW
-EXECUTE FUNCTION public.update_last_updated_column();
+  -- Link the new user to the new organization as 'owner'
+  INSERT INTO public.user_orgs (user_id, org_id, role)
+  VALUES (NEW.id, new_org_id, 'owner');
+  
+  -- Create a free subscription for the new org
+  INSERT INTO public.subscriptions (org_id, plan_type, is_active, max_projects)
+  VALUES (new_org_id, 'free', true, 5);
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger for new user signup
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- Function for RLS to set org context
+create or replace function set_config_for_org(org_id_to_set text)
+returns void as $$
+begin
+  -- check if user is a member of the org
+  if not exists (
+    select 1 from public.user_orgs
+    where org_id = org_id_to_set::uuid and user_id = auth.uid()
+  ) then
+    raise exception 'User is not a member of the specified organization';
+  end if;
+  perform set_config('app.current_org_id', org_id_to_set, false);
+end;
+$$ language plpgsql;
+
+
+-- RLS Policies
+-- Helper function to get the current org_id from the session variable
+CREATE OR REPLACE FUNCTION get_current_org() RETURNS UUID AS $$
+BEGIN
+  RETURN current_setting('app.current_org_id', true)::UUID;
+EXCEPTION
+  WHEN UNDEFINED_OBJECT THEN
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Organizations
+ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can see organizations they belong to" ON public.organizations FOR SELECT USING (
+  id IN (SELECT org_id FROM public.user_orgs WHERE user_id = auth.uid())
+);
+
+-- UserOrgs
+ALTER TABLE public.user_orgs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can see their own memberships" ON public.user_orgs FOR SELECT USING (user_id = auth.uid());
+CREATE POLICY "Owners can manage memberships in their org" ON public.user_orgs FOR ALL USING (
+  org_id = get_current_org() AND (
+    SELECT role FROM public.user_orgs WHERE user_id = auth.uid() AND org_id = get_current_org()
+  ) = 'owner'
+);
+
+-- Subscriptions
+ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can see their own org subscription" ON public.subscriptions FOR SELECT USING (org_id = get_current_org());
+
+-- Projects
+ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage projects in their current org" ON public.projects FOR ALL USING (org_id = get_current_org());
+
+-- Subprojects
+ALTER TABLE public.subprojects ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage subprojects in their current org" ON public.subprojects FOR ALL USING (
+  (SELECT org_id FROM public.projects WHERE id = project_id) = get_current_org()
+);
+
+-- BOQ Items
+ALTER TABLE public.boq_items ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage boq_items in their current org" ON public.boq_items FOR ALL USING (
+  (SELECT p.org_id FROM public.projects p JOIN public.subprojects sp ON p.id = sp.project_id WHERE sp.id = subproject_id) = get_current_org()
+);
+
+-- Ratebooks
+ALTER TABLE public.ratebooks ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow view of public ratebooks" ON public.ratebooks FOR SELECT USING (org_id IS NULL);
+CREATE POLICY "Allow access to org-specific ratebooks" ON public.ratebooks FOR ALL USING (org_id = get_current_org());
+
+-- RatebookDetails
+ALTER TABLE public.ratebook_details ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow access to ratebook items based on parent ratebook" ON public.ratebook_details FOR SELECT USING (
+  (SELECT org_id FROM public.ratebooks WHERE id = ratebook_id) IS NULL OR
+  (SELECT org_id FROM public.ratebooks WHERE id = ratebook_id) = get_current_org()
+);
+
+-- Glossary
+ALTER TABLE public.glossary ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow view of public glossary terms" ON public.glossary FOR SELECT USING (org_id IS NULL);
+CREATE POLICY "Allow access to org-specific glossary terms" ON public.glossary FOR ALL USING (org_id = get_current_org());
+
+-- Regions (public data)
+ALTER TABLE public.regions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all access to regions" ON public.regions FOR ALL USING (true);
 `;

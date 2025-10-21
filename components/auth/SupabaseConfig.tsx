@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { setSupabaseCredentials } from '../../supabase/client';
+// FIX: Removed import for 'setSupabaseCredentials' as it's no longer exported from supabase/client.ts.
+// The configuration is now hardcoded, making this component's credential-setting functionality obsolete.
 import Icon from '../Icon';
 import { ICONS } from '../../constants';
 
@@ -28,7 +29,8 @@ const SupabaseConfig: React.FC<SupabaseConfigProps> = ({ error: initialError }) 
         return;
     }
 
-    setSupabaseCredentials(url, anonKey);
+    // FIX: The 'setSupabaseCredentials' function is obsolete, so this call has been removed.
+    // setSupabaseCredentials(url, anonKey);
     // Reload the page to re-initialize the Supabase client
     window.location.reload();
   };

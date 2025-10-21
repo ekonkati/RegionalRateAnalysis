@@ -3,12 +3,45 @@ import Icon from './Icon';
 import { ICONS } from '../constants';
 import { supabase } from '../supabase/client';
 import { User } from '@supabase/supabase-js';
+import { Organization } from '../types';
+import { useTranslation } from 'react-i18next';
 
 interface HeaderProps {
   user: User | null;
+  org: Organization | null;
 }
 
-const Header: React.FC<HeaderProps> = ({ user }) => {
+const LanguageSwitcher: React.FC = () => {
+    const { i18n } = useTranslation();
+
+    const changeLanguage = (lng: string) => {
+        i18n.changeLanguage(lng);
+    };
+
+    const languages = [
+        { code: 'en', name: 'EN' },
+        { code: 'hi', name: 'HI' },
+        { code: 'te', name: 'TE' },
+        { code: 'mr', name: 'MR' },
+    ];
+
+    return (
+        <div className="flex items-center space-x-1 bg-slate-100 rounded-full p-1">
+            {languages.map(lang => (
+                 <button 
+                    key={lang.code}
+                    onClick={() => changeLanguage(lang.code)}
+                    className={`px-2 py-1 text-xs font-bold rounded-full ${i18n.language === lang.code ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}
+                 >
+                    {lang.name}
+                 </button>
+            ))}
+        </div>
+    );
+};
+
+const Header: React.FC<HeaderProps> = ({ user, org }) => {
+  const { t } = useTranslation();
   const handleSignOut = async () => {
     await supabase.auth.signOut();
   }
@@ -22,13 +55,14 @@ const Header: React.FC<HeaderProps> = ({ user }) => {
         <Icon path={ICONS.SEARCH} className="w-5 h-5 absolute text-slate-400 left-4 top-1/2 -translate-y-1/2" />
         <input 
           type="text" 
-          placeholder="Search projects, ratebooks..."
+          placeholder={`${t('projects')}, ${t('ratebooks')}...`}
           className="pl-12 pr-4 py-2.5 w-full md:w-80 text-sm bg-slate-100 border border-transparent rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 focus:bg-white"
         />
       </div>
 
       {/* User Menu */}
       <div className="flex items-center space-x-4">
+        <LanguageSwitcher />
         <button className="p-2 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-800">
           <Icon path={ICONS.BELL} className="w-6 h-6" />
         </button>
@@ -37,8 +71,8 @@ const Header: React.FC<HeaderProps> = ({ user }) => {
             {userInitial}
           </div>
           <div>
-            <p className="text-sm font-semibold text-slate-800 truncate max-w-xs">{user?.email}</p>
-            <p className="text-xs text-slate-500">User</p>
+            <p className="text-sm font-semibold text-slate-800 truncate max-w-[120px]">{user?.email}</p>
+            <p className="text-xs text-slate-500 truncate max-w-[120px]">{org?.name || 'No Organization'}</p>
           </div>
           <button onClick={handleSignOut} className="p-2 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-800" title="Sign Out">
              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">

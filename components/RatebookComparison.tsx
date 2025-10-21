@@ -1,6 +1,9 @@
+
 import React from 'react';
+// FIX: Import newly defined RatebookComparisonItem type
 import { RatebookComparisonItem } from '../types';
-import { MOCK_COMPARISON_DATA, ICONS, MOCK_FULL_RATEBOOKS } from '../constants';
+// FIX: Import the newly added MOCK_COMPARISON_DATA and remove incorrect MOCK_FULL_RATEBOOKS import
+import { MOCK_COMPARISON_DATA, ICONS } from '../constants';
 import Icon from './Icon';
 
 const RatebookComparison: React.FC<{onBack: () => void}> = ({ onBack }) => {

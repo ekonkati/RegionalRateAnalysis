@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Project } from '../../types';
 import Icon from '../Icon';
@@ -18,9 +19,11 @@ const ProjectHeader: React.FC<ProjectHeaderProps> = ({ project, onBack }) => {
         <div>
           <h1 className="text-lg font-bold text-slate-800">{project.name}</h1>
           <div className="flex items-center space-x-2 text-xs text-slate-500">
-            <span>{project.region}</span>
+            {/* FIX: Use 'region_id' as 'region' property does not exist. */}
+            <span>{project.region_id}</span>
             <span className="text-slate-300">|</span>
-            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full">{project.ratebooks?.name || '...'}</span>
+            {/* FIX: Use singular 'ratebook' instead of 'ratebooks'. */}
+            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full">{project.ratebook?.name || '...'}</span>
           </div>
         </div>
       </div>

@@ -22,10 +22,19 @@ const LoginPage: React.FC = () => {
     if (mode === 'signIn') {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setError(error.message);
+      // Main App component will handle redirect after state change
     } else {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({ 
+        email, 
+        password,
+        options: {
+            data: {
+                full_name: email.split('@')[0] // Default full_name
+            }
+        }
+      });
       if (error) setError(error.message);
-      else setMessage('Account created! Please check your email for verification.');
+      else setMessage('Account created! Please check your email for verification. A new organization has been created for you.');
     }
     
     setLoading(false);
@@ -42,7 +51,7 @@ const LoginPage: React.FC = () => {
       <div className="max-w-md w-full bg-white shadow-lg rounded-xl p-8 space-y-6">
         <div className="flex flex-col items-center">
           <Icon path={ICONS.LOGO} className="h-12 w-12 text-slate-800" />
-          <h1 className="text-2xl font-bold mt-2 text-slate-800">Welcome to RateMaster</h1>
+          <h1 className="text-2xl font-bold mt-2 text-slate-800">Welcome</h1>
           <p className="text-slate-500">{mode === 'signIn' ? 'Sign in to access your dashboard' : 'Create an account to get started'}</p>
         </div>
 

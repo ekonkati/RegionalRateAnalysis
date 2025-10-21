@@ -1,125 +1,198 @@
+// types.ts
+// Based on Design Document #1: Data Dictionary
 
-// Enums for status types, providing a single source of truth.
-export enum ProjectStatus {
-  Active = 'Active',
-  Archived = 'Archived',
-  Planning = 'Planning',
+// ---------- ENUMS ----------
+export type PlanType = 'free' | 'pro' | 'enterprise';
+export type UserRole = 'owner' | 'admin' | 'editor' | 'viewer';
+export type RatebookSourceType = 'derived' | 'upload';
+export type RatebookStatus = 'draft' | 'published' | 'archived';
+export type ProjectType = 'building' | 'road' | 'drain' | 'industrial' | 'custom';
+export type ProjectStatus = 'active' | 'archived';
+// FIX: Add 'concrete' to ItemCategory to match schema and usage in mock data and components.
+export type ItemCategory = 'labour' | 'material' | 'machinery' | 'carriage' | 'composite' | 'sundry' | 'adjustment' | 'concrete';
+export type LanguageCode = 'en' | 'hi' | 'te' | 'mr';
+
+// ---------- 1. Core Administrative Entities ----------
+export interface User {
+  id: string; // UUID
+  email: string;
+  full_name: string;
+  plan_type: PlanType;
 }
 
-export enum RatebookSource {
-  CPWD = 'CPWD',
-  StatePWD = 'State PWD',
-  Custom = 'Custom',
+export interface Organization {
+  id: string; // UUID
+  name: string;
+  domain?: string;
+  region_default_id?: string;
+  plan_type: PlanType;
+  updated_at: string;
 }
 
-export enum RatebookStatus {
-  Published = 'Published',
-  Draft = 'Draft',
+export interface UserOrg {
+  id: string; // UUID
+  user_id: string;
+  org_id: string;
+  role: UserRole;
+  organizations?: Organization; // Joined data
 }
 
-// Detailed Rate Analysis Component Types
-export interface RateAnalysisComponent {
-  id: string;
-  rate_analysis_id: string;
-  component_type: 'material' | 'labour' | 'machinery';
-  description: string;
-  quantity: number | null;
-  uom: string | null;
-  rate: number | null;
-  // Calculated in the frontend
-  amount?: number;
+export interface Subscription {
+  id: string; // UUID
+  org_id: string;
+  plan_type: PlanType;
+  is_active: boolean;
+  max_projects: number;
+  started_at?: string;
+  expires_at?: string;
 }
 
-export interface RateAnalysis {
-  id: string;
-  ratebook_item_id: string;
-  analysis_for_quantity: number;
-  uom: string;
-  contractor_overheads: ContractorOverhead | null;
-  components: RateAnalysisComponent[];
+// ---------- 2. Regional & Ratebook Management ----------
+export interface Region {
+  id: string; // UUID
+  name: string;
+  short_code: string;
+  country: string;
+  base_factor_labour: number;
+  base_factor_material: number;
+  base_factor_machinery: number;
+  base_factor_carriage: number;
+  currency_symbol: string;
+  locale: string;
 }
 
+export interface Ratebook {
+  id: string; // UUID
+  name: string;
+  region_id: string;
+  year: number;
+  effective_date: string;
+  source_type: RatebookSourceType;
+  parent_ratebook_id?: string;
+  status: RatebookStatus;
+  items_count?: number; // Added for list view
+  last_updated?: string; // Added for list view
+}
 
-// Represents a single item in a Ratebook, the source of truth for rates.
-export interface RatebookDetailItem {
-  id: string;
+export interface RatebookDetail {
+  id: string; // UUID
   ratebook_id: string;
   code: string;
-  description: string;
+  description_en: string;
+  description_local?: string;
+  lang_code?: LanguageCode;
   uom: string;
-  base_rate: number; // This is the final rate from the SOR book.
-  initial_lead_included_km: number;
-  initial_lift_included_m: number;
-  is_custom: boolean;
-  // This is a joined field for detailed analysis.
-  rate_analyses: RateAnalysis | null;
+  category: ItemCategory;
+  base_rate: number;
+  mapped_cpwd_code?: string;
+  // FIX: Add optional properties to support component features
+  rate_analyses?: any; 
+  is_custom?: boolean;
+  initial_lead_included_km?: number;
+  total_lead_km?: number;
+  initial_lift_included_m?: number;
+  total_lift_m?: number;
 }
 
-// Represents an item within a project's Bill of Quantities.
-export interface BOQItem extends Omit<RatebookDetailItem, 'is_custom' | 'ratebook_id' | 'base_rate'> {
-  id: string; // UUID for the BOQ item instance
-  ratebook_item_id: string; // Foreign key to the original RatebookDetailItem
-  quantity: number;
-  rate: number; // Base rate from the ratebook_item
-  amount: number; // This will be calculated with effective rate
-  // User overrides
-  total_lead_km: number | null;
-  total_lift_m: number | null;
+export interface RegionalFactor {
+    id: string; // UUID
+    region_id: string;
+    year: number;
+    labour: number;
+    material: number;
+    machinery: number;
+    carriage: number;
 }
 
-// A sub-section of a project, containing a list of BOQ items.
+// ---------- 3. Project Hierarchy & BOQ Data ----------
+export interface Project {
+  id: string; // UUID
+  org_id: string;
+  name: string;
+  description?: string;
+  project_type: ProjectType;
+  region_id: string;
+  ratebook_id: string;
+  water_pct: number;
+  gst_factor: number;
+  cpoh_pct: number;
+  cess_pct: number;
+  language: LanguageCode;
+  status: ProjectStatus;
+  last_updated: string; // For list view
+  totalCost?: number; // For list view
+  ratebook?: Pick<Ratebook, 'id' | 'name' | 'year'>; // Joined data
+}
+
 export interface Subproject {
   id: string; // UUID
   project_id: string;
   name: string;
-  items: BOQItem[];
+  description?: string;
+  items?: BOQItem[]; // Joined data
 }
 
-// Represents a construction project.
-export interface Project {
-  id:string; // UUID
-  name: string;
-  region: string;
-  last_updated: string; // ISO date string
-  status: ProjectStatus;
-  totalCost: number;
-  ratebook_id: string;
-  user_id: string;
-  // This is a denormalized/joined field for easier display.
-  ratebooks: {
-    id: string;
-    name: string;
-  } | null;
-  subprojects?: Subproject[]; // Optional, loaded on demand.
-}
-
-// Represents a schedule of rates book.
-export interface Ratebook {
+export interface BOQItem {
   id: string; // UUID
-  name: string;
-  source: RatebookSource;
-  year: number;
-  status: RatebookStatus;
-  items_count: number;
-  last_updated: string; // ISO date string
-  user_id?: string; // Optional: Custom ratebooks belong to a user
-}
-
-// Data for comparing two ratebooks.
-export interface RatebookComparisonItem {
-  code: string;
-  description: string;
+  subproject_id: string;
+  item_code: string;
+  description_en: string;
+  description_local?: string;
+  lang_code?: LanguageCode;
   uom: string;
-  baseRate: number;
-  targetRate: number;
-  delta: number;
-  deltaPercent: number;
+  quantity: number;
+  base_rate: number;
+  final_rate: number;
+  amount: number;
+  category: ItemCategory;
+  analysis_json?: AnalysisJSON;
+  ratebook_detail: RatebookDetail; // Joined for full details
+  // FIX: Add optional properties to support RateExplanationModal component logic
+  initial_lead_included_km?: number;
+  total_lead_km?: number;
+  initial_lift_included_m?: number;
+  total_lift_m?: number;
 }
 
-// Data for the main dashboard overview.
-export type PlanType = 'Free' | 'Pro' | 'Enterprise';
+export interface AnalysisJSON {
+    components: RateAnalysisComponent[];
+    buckets: Record<ItemCategory, number>;
+    stages: Record<string, number>; // W, X, Y, Z0, Z
+    rules_applied: any;
+    final_rounding_policy: any;
+    // FIX: Add optional properties to support RateExplanationModal component logic
+    analysis_for_quantity?: number;
+    contractor_overheads?: { percentage?: number };
+}
 
-export interface OverviewData {
+export interface RateAnalysisComponent {
+    type: ItemCategory;
+    code: string;
+    desc: string;
+    uom: string;
+    qty: number;
+    rate: number;
+    amount: number;
+    tags?: string[];
+}
+
+
+// ---------- 4. Glossary & Multilingual Support ----------
+export interface Glossary {
+  id: string; // UUID
+  term: string;
+  category: string;
+  en: string;
+  hi?: string;
+  te?: string;
+  mr?: string;
+  notes?: string;
+  approved_by?: string;
+  approved_at?: string;
+}
+
+// ---------- Dashboard Data ----------
+export interface DashboardOverviewData {
   activeProjects: {
     count: number;
     limit: number;
@@ -129,53 +202,41 @@ export interface OverviewData {
   plan: PlanType;
 }
 
-// User Profile information
-export interface UserProfile {
-  id: string; /* matches auth.users.id */
-  full_name: string;
-  company_name: string;
-  role: 'admin' | 'user';
+// FIX: Add missing type for RatebookComparison component
+export interface RatebookComparisonItem {
+  code: string;
+  description: string;
+  baseRate: number;
+  targetRate: number;
+  delta: number;
+  deltaPercent: number;
 }
 
-// New types for enhanced rate analysis
-export interface ContractorOverhead {
-  id: string;
-  region: string;
-  percentage: number;
-}
-
-export interface SeigniorageCharge {
-  id: string;
-  region: string;
-  material_category: string;
-  rate: number;
-  uom: string;
-}
-
-export interface LoadingUnloadingCharge {
-  id: string;
-  region: string;
-  material_category: string;
-  charge_type: 'loading' | 'unloading';
-  method: 'manual' | 'mechanical';
-  rate: number;
-  uom: string;
-}
-
-export interface TransportChargeSlab {
-  id: string;
-  region: string;
-  transport_type: 'lead' | 'lift';
-  material_category: string;
-  start_dist: number;
-  end_dist: number;
-  rate: number;
-  is_fixed_rate: boolean;
-}
-
+// FIX: Add missing type for RateExplanationModal component
 export interface FullCharges {
-  overheads: ContractorOverhead[];
-  seigniorage: SeigniorageCharge[];
-  loadingUnloading: LoadingUnloadingCharge[];
-  transportSlabs: TransportChargeSlab[];
+  seigniorage: any;
+  loadingUnloading: any;
+  transportSlabs: any;
+}
+
+
+// Calculation Engine related types
+export interface CalculationInputs {
+  components: RateAnalysisComponent[];
+  factors: {
+    water_pct: number;
+    gst_factor: number;
+    cpoh_pct: number;
+    cess_pct: number;
+  };
+  mode: 'derived' | 'official';
+  rules: any; // for deductions, credits etc.
+  qty_item: number;
+}
+
+export interface CalculationResult {
+    buckets: Record<ItemCategory, number>;
+    stages: { W: number; X: number; Y: number; Z0: number; Z: number };
+    final_rate: number;
+    final_amount: number;
 }

@@ -1,6 +1,8 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
+// FIX: Import 'FullCharges' type which was added to types.ts
 import { BOQItem, Project, FullCharges } from '../types';
 import Icon from './Icon';
 import { ICONS } from '../constants';
@@ -38,47 +40,50 @@ const RateExplanationModal: React.FC<RateExplanationModalProps> = ({ isOpen, onC
     
     // --- CONSTRUCT THE DETAILED PROMPT ---
     
-    let analysisText = `The base rate from the schedule of rates is ₹${item.rate.toFixed(2)} per ${item.uom}. This rate already includes material, labor, machinery, and contractor's overheads.`;
+    // FIX: Use 'base_rate' instead of non-existent 'rate' property.
+    let analysisText = `The base rate from the schedule of rates is ₹${item.base_rate.toFixed(2)} per ${item.uom}. This rate already includes material, labor, machinery, and contractor's overheads.`;
 
-    if(item.rate_analyses && item.rate_analyses.components.length > 0) {
-        const analysis = item.rate_analyses;
-        const materials = analysis.components.filter(c => c.component_type === 'material');
-        const labour = analysis.components.filter(c => c.component_type === 'labour');
-        const machinery = analysis.components.filter(c => c.component_type === 'machinery');
+    // FIX: Use 'analysis_json' instead of 'rate_analyses'. Use 'type' instead of 'component_type'.
+    if(item.analysis_json && item.analysis_json.components.length > 0) {
+        const analysis = item.analysis_json;
+        const materials = analysis.components.filter(c => c.type === 'material');
+        const labour = analysis.components.filter(c => c.type === 'labour');
+        const machinery = analysis.components.filter(c => c.type === 'machinery');
 
         analysisText = `
-        The base rate is derived from a detailed analysis for a quantity of ${analysis.analysis_for_quantity} ${analysis.uom}:
+        The base rate is derived from a detailed analysis for a quantity of ${analysis.analysis_for_quantity || 1} ${item.uom}:
         
         A. MATERIALS:
-        ${materials.map(c => `- ${c.description}: ${c.quantity} ${c.uom} @ ₹${c.rate?.toFixed(2)}`).join('\n') || '- NIL'}
+        ${materials.map(c => `- ${c.desc}: ${c.qty} ${c.uom} @ ₹${c.rate?.toFixed(2)}`).join('\n') || '- NIL'}
         
         B. LABOUR:
-        ${labour.map(c => `- ${c.description}: ${c.quantity} ${c.uom} @ ₹${c.rate?.toFixed(2)}`).join('\n') || '- NIL'}
+        ${labour.map(c => `- ${c.desc}: ${c.qty} ${c.uom} @ ₹${c.rate?.toFixed(2)}`).join('\n') || '- NIL'}
         
         C. MACHINERY:
-        ${machinery.map(c => `- ${c.description}: ${c.quantity} ${c.uom} @ ₹${c.rate?.toFixed(2)}`).join('\n') || '- NIL'}
+        ${machinery.map(c => `- ${c.desc}: ${c.qty} ${c.uom} @ ₹${c.rate?.toFixed(2)}`).join('\n') || '- NIL'}
         
         D. CONTRACTOR'S PROFIT & OVERHEADS:
         - A charge of ${analysis.contractor_overheads?.percentage || 0}% is applied to the sum of Materials, Labour, and Machinery.
         `;
     }
 
-    const leadText = `Initial lead included in the base rate: ${item.initial_lead_included_km} km. Assume a total required lead of ${item.total_lead_km || 5} km.`;
-    const liftText = `Initial lift included in the base rate: ${item.initial_lift_included_m} m. Assume a total required lift of ${item.total_lift_m || 6} m.`;
+    // FIX: Use optional properties added to BOQItem for lead/lift.
+    const leadText = `Initial lead included in the base rate: ${item.initial_lead_included_km || 1} km. Assume a total required lead of ${item.total_lead_km || 5} km.`;
+    const liftText = `Initial lift included in the base rate: ${item.initial_lift_included_m || 3} m. Assume a total required lift of ${item.total_lift_m || 6} m.`;
 
     const prompt = `
       You are an expert quantity surveyor. Your task is to provide a detailed, step-by-step rate analysis for a construction item, mimicking the format of an official public works department (PWD) document.
 
       **ITEM DETAILS:**
-      - **Description:** ${item.description}
-      - **Code:** ${item.code}
+      - **Description:** ${item.description_en}
+      - **Code:** ${item.item_code}
       - **Unit of Measurement (UOM):** ${item.uom}
-      - **Project Region:** ${project.region}
+      - **Project Region:** ${project.region_id}
 
       **BASE RATE DERIVATION:**
       ${analysisText}
 
-      **ADDITIONAL CHARGES & CONDITIONS for ${project.region}:**
+      **ADDITIONAL CHARGES & CONDITIONS for ${project.region_id}:**
       1.  **Lead & Lift:**
           ${leadText}
           ${liftText}
@@ -132,7 +137,8 @@ const RateExplanationModal: React.FC<RateExplanationModalProps> = ({ isOpen, onC
         <header className="p-4 border-b flex justify-between items-center flex-shrink-0">
           <div>
             <h2 className="text-lg font-bold text-slate-800">AI-Powered Rate Explanation</h2>
-            <p className="text-sm text-slate-500">{item.code} - {item.description.substring(0, 50)}...</p>
+            {/* FIX: Use 'item_code' and 'description_en' properties. */}
+            <p className="text-sm text-slate-500">{item.item_code} - {item.description_en.substring(0, 50)}...</p>
           </div>
           <button onClick={onClose} className="p-2 rounded-full text-slate-500 hover:bg-slate-100">
             <Icon path={ICONS.PLUS} className="w-6 h-6 transform rotate-45" />

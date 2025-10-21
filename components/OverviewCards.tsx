@@ -1,5 +1,7 @@
+
 import React from 'react';
-import { OverviewData, PlanType } from '../types';
+// FIX: Change type 'OverviewData' to 'DashboardOverviewData' to match the exported type.
+import { DashboardOverviewData, PlanType } from '../types';
 import Icon from './Icon';
 import { ICONS } from '../constants';
 
@@ -38,7 +40,7 @@ const PlanCard: React.FC<{ plan: PlanType }> = ({ plan }) => (
 );
 
 
-const OverviewCards: React.FC<{ data: OverviewData }> = ({ data }) => {
+const OverviewCards: React.FC<{ data: DashboardOverviewData }> = ({ data }) => {
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <Card

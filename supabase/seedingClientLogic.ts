@@ -1,100 +1,82 @@
-
 // This script provides client-side logic to seed sample data for the logged-in user.
 // It respects Row Level Security policies and does not require a service key.
 
 import { User } from '@supabase/supabase-js';
 import { supabase } from './client';
 import { 
-  MOCK_FULL_RATEBOOKS, 
-  MOCK_RATEBOOK_ITEMS,
-  MOCK_RATE_ANALYSES,
-  MOCK_RATE_ANALYSIS_COMPONENTS,
-  MOCK_PROJECTS, 
-  MOCK_PROJECT_DETAIL,
-  MOCK_SEIGNIORAGE_CHARGES,
-  MOCK_OVERHEADS,
-  MOCK_LOADING_UNLOADING,
-  MOCK_TRANSPORT_SLABS
+  MOCK_REGIONS,
+  MOCK_RATEBOOKS,
+  MOCK_RATEBOOK_DETAILS,
+  MOCK_PROJECTS,
+  MOCK_SUBPROJECTS,
+  MOCK_GLOSSARY
 } from '../constants';
+import { Organization, Region, Ratebook, RatebookDetail, Subproject } from '../types';
 
-export async function seedSampleData(user: User) {
-  if (!user) throw new Error("User must be logged in to seed data.");
+export async function seedSampleData(user: User, org: Organization) {
+  if (!user || !org) throw new Error("User and Organization must be available to seed data.");
 
-  console.log('Starting to seed sample data for user:', user.id);
+  console.log(`Starting to seed sample data for org: ${org.id}`);
 
   try {
-    // 1. Seed Public Charge Data (idempotent using upsert)
-    const { error: ohError } = await supabase.from('contractor_overheads').upsert(MOCK_OVERHEADS.map(o => ({...o, id: `co-${o.region.toLowerCase()}`})), { onConflict: 'region' });
-    if (ohError) throw new Error(`Overhead seeding failed: ${ohError.message}`);
+    // 1. Seed Public/Base Regions (idempotent using upsert)
+    const { data: regions, error: regionError } = await supabase.from('regions').upsert(MOCK_REGIONS).select();
+    if (regionError) throw new Error(`Region seeding failed: ${regionError.message}`);
+    const cpwdRegion = regions.find(r => r.short_code === 'CPWD') as Region;
+    console.log(`${regions.length} regions seeded.`);
 
-    const { error: sgError } = await supabase.from('seigniorage_charges').upsert(MOCK_SEIGNIORAGE_CHARGES, { onConflict: 'region,material_category' });
-    if (sgError) throw new Error(`Seigniorage charge seeding failed: ${sgError.message}`);
-
-    const { error: luError } = await supabase.from('loading_unloading_charges').upsert(MOCK_LOADING_UNLOADING, { onConflict: 'region,material_category,charge_type,method' });
-    if (luError) throw new Error(`Loading/Unloading charge seeding failed: ${luError.message}`);
-
-    const { error: tsError } = await supabase.from('transport_charge_slabs').upsert(MOCK_TRANSPORT_SLABS);
-    if (tsError) throw new Error(`Transport slab seeding failed: ${tsError.message}`);
-    console.log('Public charges and slabs seeded.');
-    
-    // 2. Seed Public Ratebooks (if they don't exist)
-    const { error: rbError } = await supabase.from('ratebooks').upsert(
-      MOCK_FULL_RATEBOOKS.map(rb => ({ ...rb, user_id: null })),
-      { onConflict: 'id' }
-    );
+    // 2. Seed Public CPWD Ratebook (if it doesn't exist)
+    const { data: ratebook, error: rbError } = await supabase.from('ratebooks').upsert({
+        ...MOCK_RATEBOOKS[0],
+        region_id: cpwdRegion.id,
+    }).select().single();
     if (rbError) throw new Error(`Ratebook seeding failed: ${rbError.message}`);
-    console.log(`${MOCK_FULL_RATEBOOKS.length} public ratebooks seeded.`);
+    console.log(`'${ratebook.name}' seeded.`);
 
-    // 3. Seed Public Ratebook Items, Analyses, and Components
-    const { error: rbItemsError } = await supabase.from('ratebook_items').upsert(MOCK_RATEBOOK_ITEMS, { onConflict: 'id' });
-    if (rbItemsError) throw new Error(`Ratebook item seeding failed: ${rbItemsError.message}`);
+    // 3. Seed Public Ratebook Details
+    const detailsToInsert = MOCK_RATEBOOK_DETAILS.map(d => ({...d, ratebook_id: ratebook.id}));
+    const { data: details, error: rbDetailsError } = await supabase.from('ratebook_details').upsert(detailsToInsert, { onConflict: 'ratebook_id,code' }).select();
+    if (rbDetailsError) throw new Error(`Ratebook details seeding failed: ${rbDetailsError.message}`);
+    console.log(`${details.length} ratebook details seeded.`);
 
-    const { error: raError } = await supabase.from('rate_analyses').upsert(MOCK_RATE_ANALYSES, { onConflict: 'ratebook_item_id' });
-    if (raError) throw new Error(`Rate analysis seeding failed: ${raError.message}`);
-    
-    // We delete and re-insert components to ensure consistency with analysis headers
-    await supabase.from('rate_analysis_components').delete().in('rate_analysis_id', MOCK_RATE_ANALYSES.map(ra => ra.id));
-    const { error: racError } = await supabase.from('rate_analysis_components').insert(MOCK_RATE_ANALYSIS_COMPONENTS);
-    if (racError) throw new Error(`Rate analysis component seeding failed: ${racError.message}`);
-    console.log('Ratebook items and detailed analyses seeded.');
+    // 4. Seed Public Glossary
+    const { error: glossaryError } = await supabase.from('glossary').upsert(MOCK_GLOSSARY, { onConflict: 'org_id,term' });
+    if (glossaryError) throw new Error(`Glossary seeding failed: ${glossaryError.message}`);
+    console.log('Glossary seeded.');
 
-    // 4. Seed User-Specific Projects
-    const projectsToInsert = MOCK_PROJECTS.map(p => ({
-      name: p.name,
-      region: p.region,
-      status: p.status,
-      total_cost: p.totalCost,
-      ratebook_id: p.ratebook_id,
-      user_id: user.id,
-    }));
-    const { data: seededProjects, error: projectsError } = await supabase.from('projects').insert(projectsToInsert).select();
-    if (projectsError) throw new Error(`Project seeding failed: ${projectsError.message}`);
-    console.log(`${seededProjects?.length} projects seeded.`);
-    
-    // 5. Seed Subprojects and BOQ Items for the first project
-    const mainProject = seededProjects[0];
-    if (mainProject && MOCK_PROJECT_DETAIL.subprojects) {
-        for (const sp of MOCK_PROJECT_DETAIL.subprojects) {
-            const { data: seededSubproject, error: spError } = await supabase
-                .from('subprojects')
-                .insert({ name: sp.name, project_id: mainProject.id })
-                .select()
-                .single();
-            if (spError) throw spError;
+    // 5. Seed User's First Project
+    const mhRegion = regions.find(r => r.short_code === 'MH') as Region;
+    const projectToInsert = {
+        ...MOCK_PROJECTS[0],
+        org_id: org.id,
+        region_id: mhRegion.id,
+        ratebook_id: ratebook.id
+    };
+    const { data: seededProject, error: projectError } = await supabase.from('projects').insert(projectToInsert).select().single();
+    if (projectError) throw new Error(`Project seeding failed: ${projectError.message}`);
+    console.log(`Project '${seededProject.name}' seeded.`);
 
-            // Add a sample BOQ item to the subproject
-             if (sp.name.includes("Excavation")) {
-                const boqItemsToInsert = [
-                    { subproject_id: seededSubproject.id, ratebook_item_id: 'rbi-excavation-soil', quantity: 2500, total_lead_km: 5, total_lift_m: 6 },
-                    { subproject_id: seededSubproject.id, ratebook_item_id: 'rbi-excavation-rock', quantity: 800, total_lead_km: 5, total_lift_m: 6 },
-                ];
-                const { error: boqError } = await supabase.from('boq_items').insert(boqItemsToInsert);
-                if (boqError) throw boqError;
-             }
-        }
-        console.log(`Subprojects and BOQ items for '${mainProject.name}' seeded.`);
+    // 6. Seed Subprojects for the new project
+    const subprojectsToInsert = MOCK_SUBPROJECTS.map(sp => ({ ...sp, project_id: seededProject.id }));
+    const { data: seededSubprojects, error: spError } = await supabase.from('subprojects').insert(subprojectsToInsert).select();
+    if (spError) throw new Error(`Subproject seeding failed: ${spError.message}`);
+    console.log(`${seededSubprojects.length} subprojects seeded.`);
+
+    // 7. Seed BOQ items for the first subproject
+    const firstSubproject = seededSubprojects[0] as Subproject;
+    const earthworkDetail = details.find(d => d.code === '0114') as RatebookDetail;
+    const concreteDetail = details.find(d => d.code === '0221') as RatebookDetail;
+
+    if(firstSubproject && earthworkDetail && concreteDetail) {
+      const boqItemsToInsert = [
+        { subproject_id: firstSubproject.id, ratebook_detail_id: earthworkDetail.id, quantity: 1500 },
+        { subproject_id: firstSubproject.id, ratebook_detail_id: concreteDetail.id, quantity: 350 },
+      ];
+      const { error: boqError } = await supabase.from('boq_items').insert(boqItemsToInsert);
+      if (boqError) throw new Error(`BOQ item seeding failed: ${boqError.message}`);
+      console.log('BOQ items seeded.');
     }
-
+    
     console.log('Sample data seeding complete!');
 
   } catch (error) {

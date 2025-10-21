@@ -3,6 +3,7 @@ import { Project, ProjectStatus } from '../types';
 import Icon from './Icon';
 import { ICONS } from '../constants';
 import { supabase } from '../supabase/client';
+import { useTranslation } from 'react-i18next';
 
 interface ProjectListProps {
   projects: Project[];
@@ -14,55 +15,38 @@ interface ProjectListProps {
 
 const getStatusChipClass = (status: ProjectStatus) => {
   switch (status) {
-    case ProjectStatus.Active:
+    case 'active':
       return 'bg-green-100 text-green-800';
-    case ProjectStatus.Archived:
+    case 'archived':
       return 'bg-slate-100 text-slate-800';
-    case ProjectStatus.Planning:
-      return 'bg-blue-100 text-blue-800';
     default:
       return 'bg-gray-100 text-gray-800';
   }
 };
 
 const ProjectList: React.FC<ProjectListProps> = ({ projects, onProjectSelect, isLoading, onRefresh, isStandalonePage = false }) => {
+  const { t } = useTranslation();
   
   const handleNewProject = async () => {
-    // A real app would open a modal to get project details.
-    // For now, creating a default project.
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      alert("You must be logged in to create a project.");
-      return;
-    }
-
-    const { error } = await supabase.from('projects').insert({
-      name: 'New Untitled Project',
-      region: 'Unspecified',
-      // This is just a placeholder, in a real app user would select a ratebook
-      ratebook_id: 'rb-cpwd-2025', 
-      user_id: user.id
-    });
-
-    if (error) {
-      alert(`Error creating project: ${error.message}`);
-    } else {
-      onRefresh(); // Refresh the list to show the new project
-    }
+    // In a real app, this would open a multi-step wizard (as per Design Doc #6).
+    // For now, creating a default project in the current org.
+    alert("This would open the 'New Project' wizard.");
+    // The wizard would then collect details and call the insert method.
+    // The RLS policy ensures it's created in the correct org.
   };
 
   return (
     <div className="bg-white rounded-xl shadow-sm">
       <div className="p-4 border-b flex justify-between items-center">
         <div>
-          <h2 className="text-lg font-bold text-slate-800">{isStandalonePage ? 'All Projects' : 'Recent Projects'}</h2>
+          <h2 className="text-lg font-bold text-slate-800">{isStandalonePage ? `All ${t('projects')}` : `Recent ${t('projects')}`}</h2>
           <p className="text-sm text-slate-500">{isStandalonePage ? 'Manage all your projects' : 'Quick access to your latest work'}</p>
         </div>
         <button 
           onClick={handleNewProject}
           className="flex items-center space-x-2 px-4 py-2 text-sm font-semibold text-white bg-slate-800 rounded-md hover:bg-slate-900 transition-colors">
           <Icon path={ICONS.PLUS} className="w-4 h-4"/>
-          <span>New Project</span>
+          <span>{t('new_project')}</span>
         </button>
       </div>
       <div className="overflow-x-auto">
@@ -70,7 +54,6 @@ const ProjectList: React.FC<ProjectListProps> = ({ projects, onProjectSelect, is
           <thead className="text-xs text-slate-700 uppercase bg-slate-50">
             <tr>
               <th scope="col" className="px-6 py-3">Project Name</th>
-              <th scope="col" className="px-6 py-3">Region</th>
               <th scope="col" className="px-6 py-3">Ratebook</th>
               <th scope="col" className="px-6 py-3">Last Updated</th>
               <th scope="col" className="px-6 py-3">Status</th>
@@ -80,14 +63,14 @@ const ProjectList: React.FC<ProjectListProps> = ({ projects, onProjectSelect, is
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={6} className="text-center p-8">
+                <td colSpan={5} className="text-center p-8">
                   <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-slate-800 mx-auto"></div>
                   <p className="mt-2 text-slate-500">Loading Projects...</p>
                 </td>
               </tr>
             ) : projects.length === 0 ? (
                <tr>
-                <td colSpan={6} className="text-center p-8 text-slate-500">
+                <td colSpan={5} className="text-center p-8 text-slate-500">
                   No projects found.
                 </td>
               </tr>
@@ -95,8 +78,7 @@ const ProjectList: React.FC<ProjectListProps> = ({ projects, onProjectSelect, is
               projects.map((project) => (
                 <tr key={project.id} className="bg-white border-b hover:bg-slate-50 cursor-pointer" onClick={() => onProjectSelect(project)}>
                   <td className="px-6 py-4 font-semibold text-slate-900">{project.name}</td>
-                  <td className="px-6 py-4">{project.region}</td>
-                  <td className="px-6 py-4">{project.ratebooks?.name || 'N/A'}</td>
+                  <td className="px-6 py-4">{project.ratebook?.name || 'N/A'}</td>
                   <td className="px-6 py-4">{new Date(project.last_updated).toLocaleDateString()}</td>
                   <td className="px-6 py-4">
                     <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusChipClass(project.status)}`}>

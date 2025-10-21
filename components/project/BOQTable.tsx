@@ -1,13 +1,13 @@
 
 import React, { useMemo } from 'react';
-import { Subproject, BOQItem, FullCharges } from '../../types';
+import { Subproject, BOQItem, Project, CalculationResult, RateAnalysisComponent, ItemCategory } from '../../types';
 import Icon from '../Icon';
 import { ICONS } from '../../constants';
 
 interface BOQTableProps {
   subproject: Subproject;
-  charges: FullCharges;
-  onExplainRate: (item: BOQItem) => void;
+  project: Project;
+  onSelectItemForBreakdown: (item: BOQItem, result: CalculationResult) => void;
   onAddItemClick: () => void;
 }
 
@@ -15,125 +15,79 @@ const formatCurrency = (value: number) => {
     return `₹${value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// Main calculation engine
-const calculateEffectiveRate = (item: BOQItem, charges: FullCharges): number => {
-    const desc = item.description.toLowerCase();
+// Main calculation engine based on Design Document #7: Calculation Flowchart (W->Z)
+export const calculateRateWZ = (item: BOQItem, project: Project): CalculationResult => {
+    // A) Prepare Components & Sum Buckets
+    // FIX: The 'concrete' key is now valid as 'ItemCategory' type was updated in types.ts.
+    const buckets: Record<ItemCategory, number> = {
+        material: 0, labour: 0, machinery: 0, carriage: 0, sundry: 0, adjustment: 0, composite: 0, concrete: 0
+    };
+
+    // For this implementation, we simplify: if there's no detailed analysis_json,
+    // we treat the base_rate as a composite bucket.
+    // A full implementation would fetch/use analysis_json here.
+    const hasAnalysis = item.analysis_json && item.analysis_json.components;
+    if (hasAnalysis) {
+        item.analysis_json.components.forEach((c: RateAnalysisComponent) => {
+            buckets[c.type] += c.amount;
+        });
+    } else {
+        // Fallback: use base_rate and assign to its category
+        buckets[item.ratebook_detail.category] = item.ratebook_detail.base_rate;
+    }
+
+    // B) Sum Buckets to get W
+    const W = Object.values(buckets).reduce((sum, val) => sum + val, 0);
+
+    // C) Apply Special Rules (pre-admin) - STUBBED FOR NOW
+    // e.g., reuse credits, deductions. W_adjusted = W - credit;
+    const W_adjusted = W;
     
-    // --- 1. Base Cost Calculation (Materials + Labour + Machinery + Overheads) ---
-    // If a detailed analysis exists, use it. Otherwise, use the SOR base rate.
-    let baseCostWithOverhead = item.rate; // Fallback to the SOR rate
-
-    if (item.rate_analyses && item.rate_analyses.components.length > 0) {
-        const analysis = item.rate_analyses;
-        const baseCost = analysis.components.reduce((sum, comp) => {
-            const amount = (comp.quantity || 0) * (comp.rate || 0);
-            return sum + amount;
-        }, 0);
-        
-        const baseRatePerUnit = baseCost / analysis.analysis_for_quantity;
-        
-        const overhead = analysis.contractor_overheads;
-        const overheadPercentage = overhead ? overhead.percentage : 0;
-        const overheadAmount = baseRatePerUnit * (overheadPercentage / 100);
-        
-        baseCostWithOverhead = baseRatePerUnit + overheadAmount;
-    }
-
-    let finalRate = baseCostWithOverhead;
-
-    // --- 2. Identify Primary Material for charge lookups ---
-    let materialCategory = 'default';
-    if (desc.includes('stone') || desc.includes('aggregate') || desc.includes('rubble') || desc.includes('rock')) {
-        materialCategory = 'rubble_stone_aggregate';
-    } else if (desc.includes('sand') || desc.includes('earth') || desc.includes('murrum')) {
-        materialCategory = 'earth_sand_murrum';
-    }
-
-    // --- 3. Add Seigniorage Charges ---
-    const seigniorageCharge = charges.seigniorage.find(c => c.material_category === materialCategory);
-    if (seigniorageCharge) {
-        finalRate += seigniorageCharge.rate;
-    }
-
-    // --- 4. Add Loading & Unloading Charges (if applicable) ---
-    // Simple heuristic: add if it's a bulk material item. Exclude pure labor items.
-    if (materialCategory !== 'default') {
-        const loading = charges.loadingUnloading.find(c => c.material_category === materialCategory && c.charge_type === 'loading');
-        const unloading = charges.loadingUnloading.find(c => c.material_category === materialCategory && c.charge_type === 'unloading');
-        if (loading) finalRate += loading.rate;
-        if (unloading) finalRate += unloading.rate;
-    }
-
-    // --- 5. Calculate and Add Additional Lead Charges ---
-    const totalLead = item.total_lead_km ?? 5; // Use override or default to 5km
-    const initialLead = item.initial_lead_included_km;
-    const additionalLead = Math.max(0, totalLead - initialLead);
-
-    if (additionalLead > 0) {
-        const leadSlabs = charges.transportSlabs.filter(s => s.transport_type === 'lead' && s.material_category === materialCategory).sort((a,b) => a.start_dist - b.start_dist);
-        let leadCost = 0;
-        let lastSlabEnd = initialLead;
-
-        // Use fixed rates for slabs up to the total lead distance
-        const fixedSlabs = leadSlabs.filter(s => s.is_fixed_rate && s.end_dist <= totalLead && s.end_dist > initialLead);
-        if (fixedSlabs.length > 0) {
-            const highestApplicableSlab = fixedSlabs[fixedSlabs.length - 1];
-            // The rate is the total cost up to that point. We need to subtract the cost up to the initial lead.
-            const costAtInitial = leadSlabs.find(s => initialLead <= s.end_dist)?.rate || 0;
-            leadCost = highestApplicableSlab.rate - costAtInitial;
-            lastSlabEnd = highestApplicableSlab.end_dist;
-        }
-
-        // Apply per-km rate for remaining distance
-        const remainingDistance = totalLead - lastSlabEnd;
-        if (remainingDistance > 0) {
-            const perKmSlab = leadSlabs.find(s => !s.is_fixed_rate && remainingDistance > 0 && totalLead > s.start_dist);
-            if (perKmSlab) {
-                leadCost += remainingDistance * perKmSlab.rate;
-            }
-        }
-        finalRate += leadCost;
-    }
+    // D) Admin Add-ons
+    // Order: Water -> GST -> CPOH -> Cess
+    const X = W_adjusted * (1 + project.water_pct / 100);
+    const Y = X * (1 + project.gst_factor); // gst_factor is multiplicative (e.g., 0.2127)
+    const Z0 = Y * (1 + project.cpoh_pct / 100);
+    const Z = Z0 * (1 + project.cess_pct / 100);
     
-    // --- 6. Calculate and Add Additional Lift Charges ---
-    const totalLift = item.total_lift_m ?? 6; // Use override or default to 6m
-    const initialLift = item.initial_lift_included_m;
-    const additionalLift = Math.max(0, totalLift - initialLift);
-
-    if (additionalLift > 0) {
-        const liftSlab = charges.transportSlabs.find(s => s.transport_type === 'lift' && s.material_category === materialCategory && !s.is_fixed_rate);
-        if (liftSlab) {
-            finalRate += additionalLift * liftSlab.rate;
-        }
-    }
+    // E) Rounding & "Say"
+    // For now, simple rounding. A full implementation would use project-level policy.
+    const final_rate = Math.round(Z * 100) / 100;
     
-    return finalRate;
+    // F) Extended Calculations
+    const final_amount = final_rate * item.quantity;
+
+    return {
+        buckets,
+        stages: { W: W, X, Y, Z0, Z },
+        final_rate,
+        final_amount,
+    };
 };
 
 
-const BOQTable: React.FC<BOQTableProps> = ({ subproject, charges, onExplainRate, onAddItemClick }) => {
+const BOQTable: React.FC<BOQTableProps> = ({ subproject, project, onSelectItemForBreakdown, onAddItemClick }) => {
     
-    const itemsWithEffectiveRates = useMemo(() => {
-        return subproject.items.map(item => {
-            const effectiveRate = calculateEffectiveRate(item, charges);
+    const itemsWithCalculatedRates = useMemo(() => {
+        return (subproject.items || []).map(item => {
+            const calculationResult = calculateRateWZ(item, project);
             return {
                 ...item,
-                effectiveRate,
-                amount: item.quantity * effectiveRate,
+                ...calculationResult,
             };
         });
-    }, [subproject.items, charges]);
+    }, [subproject.items, project]);
 
     const totalAmount = useMemo(() => 
-        itemsWithEffectiveRates.reduce((sum, item) => sum + item.amount, 0),
-    [itemsWithEffectiveRates]);
+        itemsWithCalculatedRates.reduce((sum, item) => sum + item.final_amount, 0),
+    [itemsWithCalculatedRates]);
 
     return (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden h-full flex flex-col">
             <div className="p-4 border-b flex justify-between items-center flex-shrink-0">
                 <div>
                     <h2 className="text-lg font-bold text-slate-800">{subproject.name} - Bill of Quantities</h2>
-                    <p className="text-sm text-slate-500">{subproject.items.length} items</p>
+                    <p className="text-sm text-slate-500">{(subproject.items || []).length} items</p>
                 </div>
                 <div className="flex items-center space-x-2">
                     <div className="relative">
@@ -154,25 +108,25 @@ const BOQTable: React.FC<BOQTableProps> = ({ subproject, charges, onExplainRate,
                             <th scope="col" className="px-6 py-3 w-2/5">Description</th>
                             <th scope="col" className="px-6 py-3 text-right">Quantity</th>
                             <th scope="col" className="px-6 py-3">UOM</th>
-                            <th scope="col" className="px-6 py-3 text-right">Effective Rate</th>
+                            <th scope="col" className="px-6 py-3 text-right">Final Rate</th>
                             <th scope="col" className="px-6 py-3 text-right">Amount</th>
                             <th scope="col" className="px-6 py-3 text-center">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {itemsWithEffectiveRates.map((item) => (
+                        {itemsWithCalculatedRates.map((item) => (
                             <tr key={item.id} className="bg-white hover:bg-slate-50">
-                                <td className="px-6 py-4 font-mono text-slate-700">{item.code}</td>
-                                <td className="px-6 py-4 font-medium text-slate-800 whitespace-normal">{item.description}</td>
+                                <td className="px-6 py-4 font-mono text-slate-700">{item.ratebook_detail.code}</td>
+                                <td className="px-6 py-4 font-medium text-slate-800 whitespace-normal">{item.ratebook_detail.description_en}</td>
                                 <td className="px-6 py-4 text-right font-mono">{item.quantity.toFixed(2)}</td>
-                                <td className="px-6 py-4">{item.uom}</td>
+                                <td className="px-6 py-4">{item.ratebook_detail.uom}</td>
                                 <td 
                                     className="px-6 py-4 text-right font-mono text-blue-600 hover:underline cursor-pointer"
-                                    onClick={() => onExplainRate(item)}
+                                    onClick={() => onSelectItemForBreakdown(item, item)}
                                 >
-                                    {formatCurrency((item as any).effectiveRate)}
+                                    {formatCurrency(item.final_rate)}
                                 </td>
-                                <td className="px-6 py-4 text-right font-mono font-semibold text-slate-900">{formatCurrency(item.amount)}</td>
+                                <td className="px-6 py-4 text-right font-mono font-semibold text-slate-900">{formatCurrency(item.final_amount)}</td>
                                 <td className="px-6 py-4 text-center">
                                     <button className="p-2 rounded-full hover:bg-slate-200">
                                         <Icon path={ICONS.DOTS_VERTICAL} className="w-5 h-5"/>

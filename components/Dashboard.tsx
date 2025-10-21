@@ -1,22 +1,25 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import OverviewCards from './OverviewCards';
 import ProjectList from './ProjectList';
-import { MOCK_OVERVIEW_DATA } from '../constants';
-import { OverviewData, Project } from '../types';
+import { MOCK_DASHBOARD_DATA } from '../constants';
+import { DashboardOverviewData, Project, Organization } from '../types';
 import { supabase } from '../supabase/client';
 import { User } from '@supabase/supabase-js';
 import { seedSampleData } from '../supabase/seedingClientLogic';
 import Icon from './Icon';
 import { ICONS } from '../constants';
 import DatabaseSchemaSetup from './DatabaseSchemaSetup';
+import { useTranslation } from 'react-i18next';
 
 interface DashboardProps {
   onProjectSelect: (project: Project) => void;
   user: User | null;
+  org: Organization | null;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onProjectSelect, user }) => {
-  const [overviewData, setOverviewData] = useState<OverviewData>(MOCK_OVERVIEW_DATA);
+const Dashboard: React.FC<DashboardProps> = ({ onProjectSelect, user, org }) => {
+  const { t } = useTranslation();
+  const [overviewData, setOverviewData] = useState<DashboardOverviewData>(MOCK_DASHBOARD_DATA);
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSeeding, setIsSeeding] = useState(false);
@@ -24,7 +27,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onProjectSelect, user }) => {
   const [schemaNeeded, setSchemaNeeded] = useState(false);
 
   const fetchProjects = useCallback(async () => {
-    if (!user) return;
+    if (!user || !org) return;
     
     setIsLoading(true);
     setError(null);
@@ -33,23 +36,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onProjectSelect, user }) => {
         .from('projects')
         .select(`
           *,
-          ratebooks ( id, name )
+          ratebook:ratebook_id ( id, name, year )
         `)
-        .eq('user_id', user.id)
+        .eq('org_id', org.id)
         .order('last_updated', { ascending: false })
         .limit(5);
 
       if (error) throw error;
-
-      const formattedData = data.map(p => ({
-        ...p,
-        totalCost: p.total_cost,
-      })) as unknown as Project[];
       
-      setProjects(formattedData || []);
+      setProjects(data || []);
     } catch (err: any) {
       console.error("Error fetching projects:", err);
-      // Check for Supabase error code for "relation does not exist"
       if (err.code === '42P01') {
           setSchemaNeeded(true);
       } else {
@@ -58,18 +55,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onProjectSelect, user }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  }, [user, org]);
 
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
 
   const handleSeedData = async () => {
-    if (!user) return;
+    if (!user || !org) return;
     setIsSeeding(true);
     setError(null);
     try {
-      await seedSampleData(user);
+      await seedSampleData(user, org);
       await fetchProjects(); // Refresh the project list after seeding
     } catch (err: any) {
         setError(`Failed to seed data: ${err.message}`);
@@ -85,8 +82,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onProjectSelect, user }) => {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold text-slate-800">Dashboard</h1>
-        <p className="text-slate-500 mt-1">Welcome back, here's a summary of your workspace.</p>
+        <h1 className="text-3xl font-bold text-slate-800">{t('dashboard')}</h1>
+        <p className="text-slate-500 mt-1">{t('welcome_back')}</p>
       </div>
 
       {error && (

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { RatebookDetailItem } from '../../types';
+import { RatebookDetail } from '../../types';
 import { ICONS } from '../../constants';
 import Icon from '../Icon';
 import { supabase } from '../../supabase/client';
@@ -7,15 +7,15 @@ import { supabase } from '../../supabase/client';
 interface AddItemModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddItem: (item: RatebookDetailItem, quantity: number) => void;
+  onAddItem: (item: RatebookDetail, quantity: number) => void;
   ratebookId: string;
 }
 
 const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, onClose, onAddItem, ratebookId }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [items, setItems] = useState<RatebookDetailItem[]>([]);
+  const [items, setItems] = useState<RatebookDetail[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<RatebookDetailItem | null>(null);
+  const [selectedItem, setSelectedItem] = useState<RatebookDetail | null>(null);
   const [quantity, setQuantity] = useState<number | ''>('');
   const [error, setError] = useState<string | null>(null);
 
@@ -27,10 +27,10 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, onClose, onAddItem,
     setIsLoading(true);
     try {
         const { data, error } = await supabase
-            .from('ratebook_items')
+            .from('ratebook_details')
             .select('*')
             .eq('ratebook_id', ratebookId)
-            .or(`code.ilike.%${term}%,description.ilike.%${term}%`)
+            .or(`code.ilike.%${term}%,description_en.ilike.%${term}%`)
             .limit(50);
         
         if (error) throw error;
@@ -119,8 +119,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, onClose, onAddItem,
                       className={`cursor-pointer hover:bg-slate-100 ${selectedItem?.id === item.id ? 'bg-slate-800 text-white hover:bg-slate-800' : 'text-slate-600'}`}
                     >
                       <td className="px-4 py-2 font-mono">{item.code}</td>
-                      <td className="px-4 py-2">{item.description}</td>
-                      {/* FIX: Use `base_rate` instead of the non-existent `rate` property. */}
+                      <td className="px-4 py-2">{item.description_en}</td>
                       <td className="px-4 py-2 text-right font-mono">{item.base_rate.toFixed(2)}</td>
                     </tr>
                   ))}
@@ -141,7 +140,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, onClose, onAddItem,
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">Description</p>
-                    <p className="text-slate-800">{selectedItem.description}</p>
+                    <p className="text-slate-800">{selectedItem.description_en}</p>
                   </div>
                   <div className="flex justify-between">
                     <div>
@@ -149,8 +148,7 @@ const AddItemModal: React.FC<AddItemModalProps> = ({ isOpen, onClose, onAddItem,
                       <p className="font-semibold text-slate-800">{selectedItem.uom}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-slate-500">Rate</p>
-                      {/* FIX: Use `base_rate` instead of the non-existent `rate` property. */}
+                      <p className="text-xs text-slate-500">Base Rate</p>
                       <p className="font-mono font-semibold text-slate-800">₹{selectedItem.base_rate.toFixed(2)}</p>
                     </div>
                   </div>

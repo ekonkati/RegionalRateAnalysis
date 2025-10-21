@@ -1,7 +1,9 @@
 
 
+
 import React, { useState, useEffect } from 'react';
-import { Ratebook, RatebookDetailItem } from '../../types';
+// FIX: Use the correct 'RatebookDetail' type instead of the non-existent 'RatebookDetailItem'.
+import { Ratebook, RatebookDetail } from '../../types';
 import { ICONS } from '../../constants';
 import Icon from '../Icon';
 import RatebookItemModal from './RatebookItemModal';
@@ -13,11 +15,11 @@ interface RatebookDetailsProps {
 }
 
 const RatebookDetails: React.FC<RatebookDetailsProps> = ({ ratebook, onBack }) => {
-  const [items, setItems] = useState<RatebookDetailItem[]>([]);
+  const [items, setItems] = useState<RatebookDetail[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedItem, setSelectedItem] = useState<RatebookDetailItem | null>(null);
+  const [selectedItem, setSelectedItem] = useState<RatebookDetail | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
@@ -26,14 +28,16 @@ const RatebookDetails: React.FC<RatebookDetailsProps> = ({ ratebook, onBack }) =
       setIsLoading(true);
       setError(null);
       try {
+        // FIX: Query the correct table 'ratebook_details' and remove the invalid 'rate_analyses' join.
         let query = supabase
-          .from('ratebook_items')
-          .select('*, rate_analyses(*, contractor_overheads(*), rate_analysis_components(*))')
+          .from('ratebook_details')
+          .select('*')
           .eq('ratebook_id', ratebook.id)
           .limit(100); // Add pagination for performance
 
         if (searchTerm) {
-          query = query.or(`code.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
+          // FIX: Correct search columns to 'code' and 'description_en'.
+          query = query.or(`code.ilike.%${searchTerm}%,description_en.ilike.%${searchTerm}%`);
         }
         
         const { data, error } = await query;
@@ -56,7 +60,7 @@ const RatebookDetails: React.FC<RatebookDetailsProps> = ({ ratebook, onBack }) =
   }, [ratebook, searchTerm]);
 
 
-  const handleViewItem = (item: RatebookDetailItem) => {
+  const handleViewItem = (item: RatebookDetail) => {
     setSelectedItem(item);
     setIsModalOpen(true);
   };
@@ -66,7 +70,7 @@ const RatebookDetails: React.FC<RatebookDetailsProps> = ({ ratebook, onBack }) =
       <div className="bg-white rounded-xl shadow-sm p-4 flex justify-between items-center">
         <div>
           <h2 className="text-lg font-bold text-slate-800">{ratebook.name}</h2>
-          <p className="text-sm text-slate-500">{ratebook.items_count.toLocaleString()} items</p>
+          <p className="text-sm text-slate-500">{(ratebook.items_count || 0).toLocaleString()} items</p>
         </div>
         <button onClick={onBack} className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 rounded-md hover:bg-slate-200 transition-colors">
           &larr; Back to List
@@ -112,7 +116,7 @@ const RatebookDetails: React.FC<RatebookDetailsProps> = ({ ratebook, onBack }) =
                 {items.map((item) => (
                   <tr key={item.id} className="bg-white hover:bg-slate-50">
                     <td className="px-6 py-4 font-mono text-slate-700">{item.code}</td>
-                    <td className="px-6 py-4 font-medium text-slate-800 whitespace-normal">{item.description}</td>
+                    <td className="px-6 py-4 font-medium text-slate-800 whitespace-normal">{item.description_en}</td>
                     <td className="px-6 py-4">{item.uom}</td>
                     {/* FIX: Use `base_rate` instead of the non-existent `rate` property. */}
                     <td className="px-6 py-4 text-right font-mono font-semibold text-slate-900">{item.base_rate.toFixed(2)}</td>
